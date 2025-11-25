@@ -1,0 +1,1091 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>ゴレムバトル (Golem Battle)</title>
+    
+    <!-- React & ReactDOM -->
+    <script crossorigin src="https://unpkg.com/react@18/umd/react.development.js"></script>
+    <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.development.js"></script>
+    
+    <!-- Babel -->
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+    
+    <!-- Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    
+    <!-- Firebase -->
+    <script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-app-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-auth-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore-compat.js"></script>
+
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=M+PLUS+1p:wght@400;700;800&display=swap');
+        body { font-family: 'M PLUS 1p', sans-serif; background-color: #1a202c; color: #fff; }
+        .glass { background: rgba(255, 255, 255, 0.1); backdrop-filter: blur(10px); border: 1px solid rgba(255, 255, 255, 0.2); }
+        /* Scrollbar */
+        ::-webkit-scrollbar { width: 8px; }
+        ::-webkit-scrollbar-track { background: #2d3748; }
+        ::-webkit-scrollbar-thumb { background: #4a5568; border-radius: 4px; }
+        ::-webkit-scrollbar-thumb:hover { background: #718096; }
+    </style>
+</head>
+<body>
+    <div id="root"></div>
+
+    <script type="text/babel">
+        // --- Firebase Config & Global ---
+        const apiKey = ""; 
+        const appId = typeof __app_id !== 'undefined' ? __app_id : 'golem-battle-v1';
+        const firebaseConfig = typeof __firebase_config !== 'undefined' ? JSON.parse(__firebase_config) : null;
+        
+        let db, auth;
+        if (firebaseConfig) {
+            const app = firebase.initializeApp(firebaseConfig);
+            db = firebase.firestore(app);
+            auth = firebase.auth(app);
+        }
+
+        // --- Constants & Data ---
+        const GOLEM_DB = [
+            { id: 1, name: "プレーン・G", cost: 3, hp: 90, atk: 40, mp: 20, def: 30, sp: 30, special: "リセット・フォーム", specialDesc: "味方フィールド全体のデバフを全て解除する。", passive: "デバフの効果を受けない", passiveDesc: "デバフの効果を受けない" },
+            { id: 2, name: "ハイ・リスク", cost: 3, hp: 85, atk: 40, mp: 25, def: 25, sp: 30, special: "リスキー・ストライク", specialDesc: "敵一体にATK2倍のストライク。自身もダメージの50%を受ける", passive: "ストライクダメージ増", passiveDesc: "ストライクダメージが1.2倍になるが、被ダメも1.2倍" },
+            { id: 3, name: "ミミッカー", cost: 3, hp: 90, atk: 25, mp: 30, def: 25, sp: 35, special: "コピー・ステータス", specialDesc: "相手のランダムな1体のHP以外のステータスをコピー(3ターン)", passive: "危機回避", passiveDesc: "HP30%以下でMP1.2倍" },
+            { id: 4, name: "レムナンツ", cost: 5, hp: 110, atk: 35, mp: 20, def: 30, sp: 20, special: "マイリペア", specialDesc: "自身のHPを最大HPの50%回復。", passive: "緊急防御", passiveDesc: "HP30%以下で被ダメージ15%軽減" },
+            { id: 5, name: "モールドン", cost: 5, hp: 110, atk: 40, mp: 20, def: 30, sp: 15, special: "クレイ・ディスター", specialDesc: "次ターンから3ターン敵全体のSPを10%減少", passive: "泥の束縛", passiveDesc: "被弾時、相手のSPを-1" },
+            { id: 6, name: "アトランダム", cost: 5, hp: 90, atk: 40, mp: 20, def: 35, sp: 30, special: "ランダム・ストライク", specialDesc: "自身以外(敵味方)ランダム3体にストライク", passive: "気まぐれ", passiveDesc: "ターン開始時ランダムなステータス+5(次ターンリセット)" },
+            { id: 7, name: "アルカノイド", cost: 5, hp: 85, atk: 20, mp: 40, def: 25, sp: 35, special: "魔力暴走", specialDesc: "全体にMP40%分の防御無視ダメージ", passive: "魔力浸透", passiveDesc: "マジック攻撃時、相手DEFを-5して計算" },
+            { id: 8, name: "リヴァイブ", cost: 5, hp: 100, atk: 25, mp: 35, def: 30, sp: 30, special: "リサイクル・コア", specialDesc: "退場した味方1体をHP20%で復活", passive: "自動修復", passiveDesc: "毎ターン終了時HP5回復" },
+            { id: 9, name: "アイン・アイゼン", cost: 5, hp: 90, atk: 35, mp: 15, def: 45, sp: 20, special: "超装甲展開", specialDesc: "次ターンから2ターン味方全体DEF15%上昇", passive: "鉄壁のオーラ", passiveDesc: "生存中、味方DEF+3" },
+            { id: 10, name: "ピッカー", cost: 7, hp: 85, atk: 45, mp: 15, def: 30, sp: 45, special: "装甲強奪", specialDesc: "敵一体のDEF20%減少(永続)", passive: "弱点看破", passiveDesc: "敵DEF50以上でストライクダメ10%増" },
+            { id: 11, name: "ファントマ", cost: 7, hp: 85, atk: 30, mp: 35, def: 30, sp: 40, special: "幻影撃", specialDesc: "敵2体にマジック攻撃", passive: "幻影", passiveDesc: "単体攻撃対象時15%で回避" },
+            { id: 12, name: "ブスター", cost: 7, hp: 80, atk: 40, mp: 15, def: 30, sp: 50, special: "ターボ・ブースト", specialDesc: "敵一体にSPと同値のダメージ。次ターン行動不可", passive: "オーバーヒート", passiveDesc: "ターン終了時HP-3、SP+1" },
+            { id: 13, name: "オーラム", cost: 7, hp: 90, atk: 35, mp: 35, def: 40, sp: 20, special: "黄金の祈り", specialDesc: "味方全体のHPを自身のHPの20%分回復", passive: "錬金術", passiveDesc: "パーティにいる場合最大AP+5" },
+            { id: 14, name: "バースティン", cost: 10, hp: 95, atk: 50, mp: 25, def: 30, sp: 35, special: "バーストキャノン", specialDesc: "1体に防御無視固定ダメージ70", passive: "撃破衝動", passiveDesc: "撃破時ATK20%増加" },
+            { id: 15, name: "リグレトス", cost: 10, hp: 85, atk: 30, mp: 45, def: 25, sp: 40, special: "残響の歯車", specialDesc: "敵全体ATK/MP15%減少(永続)", passive: "魔力蓄積", passiveDesc: "マジック攻撃時、自身MP+3" },
+            { id: 16, name: "ザイグランド", cost: 10, hp: 100, atk: 55, mp: 15, def: 35, sp: 30, special: "グランドストライク", specialDesc: "敵全体にストライクダメージ", passive: "背水の陣", passiveDesc: "HP50%以下でATK20%上昇" },
+            { id: 17, name: "ドラザリオン", cost: 12, hp: 100, atk: 40, mp: 35, def: 35, sp: 40, special: "ドラゴニックバーン", specialDesc: "敵全体にATK+MP合計値を割り振りダメージ", passive: "巨竜の呪い", passiveDesc: "ATK30%減だがストライクが全体化" }
+        ];
+
+        // --- Icons ---
+        const IconBase = ({ size = 24, color = "currentColor", children, ...props }) => (
+            <svg xmlns="http://www.w3.org/2000/svg" width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" {...props}>
+                {children}
+            </svg>
+        );
+        const Bot = (props) => <IconBase {...props}><rect x="3" y="11" width="18" height="10" rx="2" /><circle cx="12" cy="5" r="2" /><path d="M12 7v4" /><line x1="8" y1="16" x2="8" y2="16" /><line x1="16" y1="16" x2="16" y2="16" /></IconBase>;
+        const Swords = (props) => <IconBase {...props}><polyline points="14.5 17.5 3 6 3 3 6 3 17.5 14.5" /><line x1="13" y1="19" x2="19" y2="13" /><line x1="16" y1="16" x2="20" y2="20" /><line x1="19" y1="21" x2="21" y2="19" /></IconBase>;
+        const Shield = (props) => <IconBase {...props}><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z" /></IconBase>;
+        const Zap = (props) => <IconBase {...props}><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2" /></IconBase>;
+        const Heart = (props) => <IconBase {...props}><path d="M19 14c1.49-1.46 3-3.21 3-5.5A5.5 5.5 0 0 0 16.5 3c-1.76 0-3 .5-4.5 2-1.5-1.5-2.74-2-4.5-2A5.5 5.5 0 0 0 2 8.5c0 2.3 1.5 4.05 3 5.5l7 7Z" /></IconBase>;
+        const Activity = (props) => <IconBase {...props}><polyline points="22 12 18 12 15 21 9 3 6 12 2 12" /></IconBase>;
+        const RefreshCw = (props) => <IconBase {...props}><path d="M3 12a9 9 0 0 1 9-9 9.75 9.75 0 0 1 6.74 2.74L21 8" /><path d="M21 3v5h-5" /><path d="M21 12a9 9 0 0 1-9 9 9.75 9.75 0 0 1-6.74-2.74L3 16" /><path d="M8 16H3v5" /></IconBase>;
+        const ArrowRight = (props) => <IconBase {...props}><line x1="5" y1="12" x2="19" y2="12" /><polyline points="12 5 19 12 12 19" /></IconBase>;
+        const Info = (props) => <IconBase {...props}><circle cx="12" cy="12" r="10" /><line x1="12" y1="16" x2="12" y2="12" /><line x1="12" y1="8" x2="12.01" y2="8" /></IconBase>;
+
+        // --- Utils ---
+        const calculateDamage = (type, attacker, defender) => {
+            let atk = attacker.currentStats.atk;
+            let mp = attacker.currentStats.mp;
+            let def = defender.currentStats.def;
+
+            if (attacker.originalId === 7 && type === 'magic') {
+                def = Math.max(0, def - 5);
+            }
+            if (attacker.originalId === 2 && type === 'strike') {
+                atk = atk * 1.2;
+            }
+            if (attacker.originalId === 10 && defender.currentStats.def >= 50 && type === 'strike') {
+                atk = atk * 1.1;
+            }
+            if (attacker.originalId === 17) {
+                atk = atk * 0.7;
+            }
+
+            let damage = 0;
+            if (type === 'strike') {
+                damage = atk - (def * 0.8);
+            } else if (type === 'magic') {
+                damage = (mp * 1.2) - (def * 0.8);
+            }
+
+            return Math.max(1, Math.floor(damage));
+        };
+
+        const calculateRecover = (caster) => {
+            return Math.floor(caster.currentStats.mp * 0.7);
+        };
+
+        const generateRandomGolems = (count) => {
+            const shuffled = [...GOLEM_DB].sort(() => 0.5 - Math.random());
+            return shuffled.slice(0, count).map(g => ({ ...g, uid: Math.random().toString(36).substr(2, 9) }));
+        };
+
+        // --- Components ---
+
+        const GolemCard = ({ golem, isSelected, onClick, showStats = true, showCost = true, showDetails = false, showHpBar = false, isEnemy = false }) => {
+            const [imgError, setImgError] = React.useState(false);
+            // 画像パスを変更（Githubの同じ階層を想定）
+            const imagePath = `./${golem.name}.png`;
+
+            const maxHp = golem.maxHp || golem.hp;
+            const currentHp = golem.currentHp !== undefined ? golem.currentHp : golem.hp;
+            const hpPercent = (currentHp / maxHp) * 100;
+            
+            let barColor = "bg-green-500";
+            if (hpPercent <= 30) barColor = "bg-red-500";
+            else if (hpPercent <= 50) barColor = "bg-yellow-500";
+
+            // スペシャル技・特性の表示コンポーネント
+            const SkillsDisplay = () => (
+                <div className="space-y-1 mt-2 text-xs bg-black/40 p-2 rounded border border-white/10 backdrop-blur-sm">
+                    <div>
+                        <div className="text-yellow-400 font-bold flex items-center gap-1 mb-0.5 text-[10px]"><Activity size={10}/> {golem.special}</div>
+                        <div className="text-gray-300 text-[10px] leading-tight line-clamp-2 scale-95 origin-top-left">{golem.specialDesc}</div>
+                    </div>
+                    <div className="mt-1">
+                        <div className="text-purple-400 font-bold flex items-center gap-1 mb-0.5 text-[10px]"><Info size={10}/> {golem.passive}</div>
+                        <div className="text-gray-300 text-[10px] leading-tight line-clamp-2 scale-95 origin-top-left">{golem.passiveDesc}</div>
+                    </div>
+                </div>
+            );
+
+            return (
+                <div 
+                    onClick={onClick}
+                    className={`relative p-2 rounded-xl border-2 cursor-pointer transition-all duration-200 flex flex-col h-full shadow-xl overflow-hidden group
+                    ${isSelected ? 'border-yellow-400 bg-yellow-900/40 ring-2 ring-yellow-400/50' : 'border-gray-600 bg-gray-800 hover:border-gray-400'}
+                    ${currentHp <= 0 ? 'opacity-50 grayscale' : ''}
+                    `}
+                >
+                    {/* Image Container (Square 1:1) */}
+                    <div className="relative w-full aspect-square bg-gray-700 rounded-lg overflow-hidden shadow-inner">
+                        {!imgError ? (
+                            <img 
+                                src={imagePath} 
+                                alt={golem.name} 
+                                className="w-full h-full object-cover transition-transform duration-500 group-hover:scale-110" 
+                                onError={() => setImgError(true)}
+                            />
+                        ) : (
+                            <div className="w-full h-full flex items-center justify-center bg-gray-800">
+                                <Bot size={48} className="text-gray-500" />
+                                <span className="absolute bottom-2 text-xs text-gray-500">{golem.name}</span>
+                            </div>
+                        )}
+
+                        {/* Cost Badge (Top Right) */}
+                        {showCost && (
+                            <div className="absolute top-1 right-1 bg-black/70 text-yellow-400 px-1.5 py-0.5 rounded text-xs font-mono font-bold border border-yellow-600 shadow-md backdrop-blur-sm z-10">
+                                Cost {golem.cost}
+                            </div>
+                        )}
+
+                        {/* HP Bar & Name Overlay (Bottom of Image) */}
+                        {showHpBar && (
+                            <div className="absolute bottom-0 left-0 right-0 p-2 bg-gradient-to-t from-black/90 via-black/60 to-transparent pt-6">
+                                {/* Name above HP Bar */}
+                                <div className="flex justify-between items-end mb-1 px-1">
+                                    <h3 className="text-sm font-bold text-white drop-shadow-md leading-none">{golem.name}</h3>
+                                    {!isEnemy && (
+                                        <span className="text-[10px] font-mono text-gray-300 leading-none">{currentHp}/{maxHp}</span>
+                                    )}
+                                </div>
+                                
+                                {/* HP Bar */}
+                                <div className="h-2 bg-gray-700 rounded-full border border-gray-600 overflow-hidden shadow-sm relative mx-1">
+                                    <div 
+                                        className={`h-full transition-all duration-300 ${barColor}`} 
+                                        style={{ width: `${Math.max(0, Math.min(100, hpPercent))}%` }}
+                                    ></div>
+                                </div>
+                            </div>
+                        )}
+                        
+                        {/* Name Only (If no HP Bar, e.g. Draft) */}
+                        {!showHpBar && (
+                            <div className="absolute bottom-0 left-0 right-0 p-2 bg-gradient-to-t from-black/80 to-transparent">
+                                <h3 className="text-sm font-bold text-white drop-shadow-md text-center">{golem.name}</h3>
+                            </div>
+                        )}
+                    </div>
+
+                    {/* Footer: Stats & Skills */}
+                    <div className="mt-2">
+                        {isEnemy ? (
+                            // 敵：スキルのみ表示
+                            <SkillsDisplay />
+                        ) : (
+                            // 味方・ドラフト時
+                            <>
+                                {showStats && (
+                                    <div className="grid grid-cols-5 gap-0.5 text-[10px] bg-black/20 p-1 rounded mb-1">
+                                        <div className="flex flex-col items-center"><span className="text-red-400 font-bold scale-75 origin-bottom">HP</span><span className="font-mono">{currentHp}</span></div>
+                                        <div className="flex flex-col items-center"><span className="text-orange-400 font-bold scale-75 origin-bottom">ATK</span><span className="font-mono">{golem.currentStats?.atk ?? golem.atk}</span></div>
+                                        <div className="flex flex-col items-center"><span className="text-blue-400 font-bold scale-75 origin-bottom">MP</span><span className="font-mono">{golem.currentStats?.mp ?? golem.mp}</span></div>
+                                        <div className="flex flex-col items-center"><span className="text-green-400 font-bold scale-75 origin-bottom">DEF</span><span className="font-mono">{golem.currentStats?.def ?? golem.def}</span></div>
+                                        <div className="flex flex-col items-center"><span className="text-purple-400 font-bold scale-75 origin-bottom">SP</span><span className="font-mono">{golem.currentStats?.sp ?? golem.sp}</span></div>
+                                    </div>
+                                )}
+                                
+                                {/* バトル中または詳細表示ONの時はスキルを表示 */}
+                                {(showHpBar || showDetails) && <SkillsDisplay />}
+                            </>
+                        )}
+                    </div>
+                </div>
+            );
+        };
+
+        const StatEnhancer = ({ label, value, current, cost, ap, onIncrease, onDecrease, onIncrease10, onDecrease10, color }) => (
+            <div className="flex flex-col sm:flex-row items-center justify-between bg-gray-900/50 p-2 rounded mb-1 gap-2">
+                <div className="flex items-center gap-2 w-full sm:w-auto justify-between sm:justify-start">
+                    <span className={`text-sm font-bold ${color} w-8`}>{label}</span>
+                    <span className="text-lg font-mono font-bold text-white bg-black/30 px-2 rounded min-w-[3rem] text-center">{current}</span>
+                </div>
+                <div className="flex items-center gap-1">
+                    <button 
+                        onClick={onDecrease10} 
+                        disabled={value < 10}
+                        className="h-8 px-2 flex items-center justify-center rounded bg-gray-700 disabled:opacity-30 hover:bg-gray-600 text-xs font-bold min-w-[32px]"
+                    >-10</button>
+                    <button 
+                        onClick={onDecrease} 
+                        disabled={value <= 0}
+                        className="h-8 px-3 flex items-center justify-center rounded bg-gray-700 disabled:opacity-30 hover:bg-gray-600 text-lg min-w-[32px]"
+                    >-</button>
+                    <span className="w-8 text-center text-xs font-mono text-gray-400">+{value}</span>
+                    <button 
+                        onClick={onIncrease} 
+                        disabled={ap < cost}
+                        className="h-8 px-3 flex items-center justify-center rounded bg-gray-700 disabled:opacity-30 hover:bg-gray-600 min-w-[32px]"
+                    >+1</button>
+                    <button 
+                        onClick={onIncrease10} 
+                        disabled={ap < cost * 10}
+                        className="h-8 px-2 flex items-center justify-center rounded bg-yellow-900/40 border border-yellow-700/50 disabled:opacity-30 hover:bg-yellow-800 text-xs font-bold text-yellow-200 min-w-[32px]"
+                    >+10</button>
+                </div>
+            </div>
+        );
+
+        const LibraryModal = ({ onClose }) => {
+            const [selected, setSelected] = React.useState(GOLEM_DB[0]);
+            
+            return (
+                <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/90 p-4" onClick={onClose}>
+                    <div className="bg-gray-800 w-full max-w-4xl h-[80vh] flex flex-col rounded-xl border border-gray-600 shadow-2xl overflow-hidden" onClick={e => e.stopPropagation()}>
+                        <header className="p-4 border-b border-gray-700 flex justify-between items-center bg-gray-900">
+                            <h2 className="text-xl font-bold text-yellow-400 flex items-center gap-2"><Bot /> ゴレム図鑑</h2>
+                            <button onClick={onClose} className="px-3 py-1 bg-gray-700 hover:bg-gray-600 rounded">✕ 閉じる</button>
+                        </header>
+                        
+                        <div className="flex-1 flex overflow-hidden">
+                            <div className="w-1/3 md:w-1/4 overflow-y-auto border-r border-gray-700 p-2 space-y-1 bg-gray-800">
+                                {GOLEM_DB.map(g => (
+                                    <div 
+                                        key={g.id} 
+                                        onClick={() => setSelected(g)}
+                                        className={`p-2 rounded flex items-center gap-2 cursor-pointer transition-colors
+                                            ${selected?.id === g.id ? 'bg-blue-900/50 ring-1 ring-blue-400' : 'hover:bg-gray-700'}`}
+                                    >
+                                        <div className="w-8 h-8 bg-gray-600 rounded flex-shrink-0 overflow-hidden">
+                                             <img src={`./images/${g.name}.png`} className="w-full h-full object-cover" onError={(e)=>e.target.style.display='none'}/>
+                                        </div>
+                                        <div className="min-w-0">
+                                            <div className="text-sm font-bold truncate">{g.name}</div>
+                                            <div className="text-xs text-gray-400">Cost: {g.cost}</div>
+                                        </div>
+                                    </div>
+                                ))}
+                            </div>
+                            
+                            <div className="flex-1 p-6 overflow-y-auto bg-gray-900/50 flex flex-col items-center">
+                                {selected ? (
+                                    <div className="w-full max-w-lg animate-fade-in">
+                                        <div className="flex items-center gap-4 mb-6">
+                                             <div className="w-24 h-24 bg-gray-700 rounded-lg overflow-hidden border-2 border-gray-500 shadow-lg flex-shrink-0">
+                                                <img src={`./images/${selected.name}.png`} className="w-full h-full object-cover" onError={(e)=>e.target.style.display='none'}/>
+                                             </div>
+                                             <div>
+                                                <h2 className="text-3xl font-bold text-white mb-1">{selected.name}</h2>
+                                                <span className="bg-yellow-900 text-yellow-200 px-2 py-1 rounded text-sm font-mono border border-yellow-700">Cost: {selected.cost}</span>
+                                             </div>
+                                        </div>
+                                        
+                                        <div className="grid grid-cols-5 gap-2 text-center bg-gray-800 p-4 rounded-lg mb-6 border border-gray-600 shadow-lg">
+                                            <div><div className="text-xs text-red-400 font-bold mb-1">HP</div><div className="text-xl font-mono">{selected.hp}</div></div>
+                                            <div><div className="text-xs text-orange-400 font-bold mb-1">ATK</div><div className="text-xl font-mono">{selected.atk}</div></div>
+                                            <div><div className="text-xs text-blue-400 font-bold mb-1">MP</div><div className="text-xl font-mono">{selected.mp}</div></div>
+                                            <div><div className="text-xs text-green-400 font-bold mb-1">DEF</div><div className="text-xl font-mono">{selected.def}</div></div>
+                                            <div><div className="text-xs text-purple-400 font-bold mb-1">SP</div><div className="text-xl font-mono">{selected.sp}</div></div>
+                                        </div>
+
+                                        <div className="space-y-4">
+                                            <div className="bg-gray-800 p-4 rounded-lg border-l-4 border-yellow-500 shadow">
+                                                <div className="flex items-center gap-2 text-yellow-400 font-bold mb-2">
+                                                    <Activity size={18}/> SPECIAL SKILL <span className="text-xs text-gray-500 bg-gray-900 px-2 rounded-full border border-gray-700">3 Turn+</span>
+                                                </div>
+                                                <div className="text-lg font-bold text-white mb-1">{selected.special}</div>
+                                                <div className="text-sm text-gray-300 leading-relaxed">{selected.specialDesc}</div>
+                                            </div>
+                                            
+                                            <div className="bg-gray-800 p-4 rounded-lg border-l-4 border-purple-500 shadow">
+                                                 <div className="flex items-center gap-2 text-purple-400 font-bold mb-2">
+                                                    <Info size={18}/> PASSIVE ABILITY
+                                                </div>
+                                                <div className="text-lg font-bold text-white mb-1">{selected.passive}</div>
+                                                <div className="text-sm text-gray-300 leading-relaxed">{selected.passiveDesc}</div>
+                                            </div>
+                                        </div>
+                                    </div>
+                                ) : (
+                                    <div className="h-full flex items-center justify-center text-gray-500">
+                                        左のリストからゴレムを選択してください
+                                    </div>
+                                )}
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            );
+        };
+
+        const GolemDetailsModal = ({ golem, onClose }) => {
+            if (!golem) return null;
+            return (
+                <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 p-4" onClick={onClose}>
+                    <div className="bg-gray-800 border border-gray-600 rounded-xl p-6 max-w-md w-full shadow-2xl" onClick={e => e.stopPropagation()}>
+                        <h2 className="text-2xl font-bold mb-4 text-yellow-400">{golem.name}</h2>
+                        
+                        <div className="space-y-4">
+                            <div>
+                                <h4 className="text-sm font-bold text-gray-400 mb-1">基本ステータス</h4>
+                                <div className="grid grid-cols-5 gap-2 text-center bg-gray-900 p-2 rounded">
+                                    <div><div className="text-xs text-red-400">HP</div>{golem.hp}</div>
+                                    <div><div className="text-xs text-orange-400">ATK</div>{golem.atk}</div>
+                                    <div><div className="text-xs text-blue-400">MP</div>{golem.mp}</div>
+                                    <div><div className="text-xs text-green-400">DEF</div>{golem.def}</div>
+                                    <div><div className="text-xs text-purple-400">SP</div>{golem.sp}</div>
+                                </div>
+                            </div>
+
+                            <div>
+                                <h4 className="text-sm font-bold text-gray-400 mb-1">スペシャル技 (Turn 3+)</h4>
+                                <div className="bg-gray-900 p-3 rounded">
+                                    <div className="font-bold text-yellow-200">{golem.special}</div>
+                                    <div className="text-sm text-gray-300 mt-1">{golem.specialDesc}</div>
+                                </div>
+                            </div>
+
+                            <div>
+                                <h4 className="text-sm font-bold text-gray-400 mb-1">特性 (Passive)</h4>
+                                <div className="bg-gray-900 p-3 rounded">
+                                    <div className="font-bold text-purple-200">{golem.passive}</div>
+                                    <div className="text-sm text-gray-300 mt-1">{golem.passiveDesc}</div>
+                                </div>
+                            </div>
+                        </div>
+
+                        <button onClick={onClose} className="mt-6 w-full py-2 bg-gray-700 hover:bg-gray-600 rounded font-bold">
+                            閉じる
+                        </button>
+                    </div>
+                </div>
+            );
+        };
+
+        // --- Main App ---
+        const App = () => {
+            // States
+            const [user, setUser] = React.useState(null);
+            const [phase, setPhase] = React.useState('lobby'); // lobby, draft, alchemy, battle, gameover
+            const [gameMode, setGameMode] = React.useState('cpu'); // cpu, pvp
+            const [roomId, setRoomId] = React.useState('');
+            const [playerId, setPlayerId] = React.useState(1); // 1 or 2
+            
+            // Game Data
+            const [draftPool, setDraftPool] = React.useState([]);
+            const [myTeam, setMyTeam] = React.useState([]);
+            const [enemyTeam, setEnemyTeam] = React.useState([]);
+            const [alchemyPoints, setAlchemyPoints] = React.useState(50);
+            const [turn, setTurn] = React.useState(1);
+            const [battleLogs, setBattleLogs] = React.useState([]);
+            const [actionQueue, setActionQueue] = React.useState([]); // Queue of golems to act in order
+            const [currentActorIndex, setCurrentActorIndex] = React.useState(0);
+            const [selectedTarget, setSelectedTarget] = React.useState(null);
+            const [viewingGolem, setViewingGolem] = React.useState(null);
+            
+            const [showLibrary, setShowLibrary] = React.useState(false);
+
+            // Auth Logic
+            React.useEffect(() => {
+                if(!auth) return;
+                const unsub = auth.onAuthStateChanged(u => {
+                    if (u) setUser(u);
+                    else if (typeof __initial_auth_token !== 'undefined') auth.signInWithCustomToken(__initial_auth_token);
+                    else auth.signInAnonymously();
+                });
+                return () => unsub();
+            }, []);
+
+            // Firestore Listener for PvP
+            React.useEffect(() => {
+                if (gameMode !== 'pvp' || !roomId || !user) return;
+                
+                const roomRef = db.collection('artifacts').doc(appId).collection('public').doc('data').collection('rooms').doc(roomId);
+
+                const unsub = roomRef.onSnapshot(doc => {
+                    if (!doc.exists) return;
+                    const data = doc.data();
+                    
+                    if (data.phase === 'battle' && phase === 'alchemy_wait') {
+                        setEnemyTeam(playerId === 1 ? data.player2Team : data.player1Team);
+                        setPhase('battle');
+                        initializeBattle(myTeam, playerId === 1 ? data.player2Team : data.player1Team);
+                    }
+                }, err => console.error("Sync error", err));
+
+                return () => unsub();
+            }, [gameMode, roomId, phase, myTeam]);
+
+            // CPU Action Trigger (Robust useEffect based approach)
+            React.useEffect(() => {
+                if (phase !== 'battle' || gameMode !== 'cpu') return;
+                
+                const currentActor = actionQueue[currentActorIndex];
+                if (!currentActor) return;
+
+                // Check if it's CPU's turn
+                if (currentActor.team !== playerId && !currentActor.isDead) {
+                    const timer = setTimeout(() => {
+                        cpuAction(currentActor);
+                    }, 1000); // 1 second think time
+                    return () => clearTimeout(timer);
+                } else if (currentActor.isDead) {
+                    // Skip dead automatically
+                     const timer = setTimeout(() => {
+                        nextTurn();
+                    }, 500);
+                     return () => clearTimeout(timer);
+                }
+
+            }, [currentActorIndex, turn, phase, actionQueue]);
+
+
+            // --- Game Logic Functions ---
+
+            const startCpuGame = () => {
+                setGameMode('cpu');
+                setPlayerId(1);
+                const pool = generateRandomGolems(10);
+                setDraftPool(pool);
+                setPhase('draft');
+                setBattleLogs([{ turn: 0, text: "ゲーム開始！ゴレムを選出してください。", type: "info" }]);
+            };
+
+            const startPvpGame = async (isHost) => {
+                if (!roomId) return alert("ルームIDを入力してください");
+                setGameMode('pvp');
+                setPlayerId(isHost ? 1 : 2);
+                
+                const roomRef = db.collection('artifacts').doc(appId).collection('public').doc('data').collection('rooms').doc(roomId);
+                
+                if (isHost) {
+                    const pool = generateRandomGolems(10);
+                    setDraftPool(pool);
+                    await roomRef.set({
+                        createdAt: firebase.firestore.FieldValue.serverTimestamp(),
+                        draftPool: pool,
+                        phase: 'draft',
+                        player1Id: user.uid
+                    });
+                    setPhase('draft');
+                } else {
+                    const doc = await roomRef.get();
+                    if (!doc.exists) return alert("ルームが見つかりません");
+                    const data = doc.data();
+                    setDraftPool(data.draftPool);
+                    await roomRef.update({ player2Id: user.uid });
+                    setPhase('draft');
+                }
+            };
+
+            const handleDraftSelect = (golem) => {
+                if (myTeam.find(g => g.id === golem.id)) {
+                    setMyTeam(myTeam.filter(g => g.id !== golem.id));
+                    return;
+                }
+                
+                if (myTeam.length >= 3) return alert("3体までです");
+                
+                const currentCost = myTeam.reduce((acc, g) => acc + g.cost, 0);
+                if (currentCost + golem.cost > 20) return alert("コストオーバーです (Max 20)");
+
+                const battleGolem = {
+                    ...golem,
+                    originalId: golem.id,
+                    maxHp: golem.hp,
+                    currentHp: golem.hp,
+                    currentStats: { atk: golem.atk, mp: golem.mp, def: golem.def, sp: golem.sp },
+                    boosts: { hp: 0, atk: 0, mp: 0, def: 0, sp: 0 },
+                    buffs: [],
+                    cooldowns: { recover: 0 },
+                    isSpecialUsed: false,
+                    isDead: false,
+                    team: playerId
+                };
+
+                setMyTeam([...myTeam, battleGolem]);
+            };
+
+            const confirmDraft = () => {
+                if (myTeam.length !== 3) return alert("3体選んでください");
+                
+                const hasAurum = myTeam.some(g => g.id === 13);
+                setAlchemyPoints(hasAurum ? 55 : 50);
+
+                if (gameMode === 'cpu') {
+                    let cpuTeam = [];
+                    let cpuPool = [...draftPool].filter(g => !myTeam.find(m => m.id === g.id));
+                    let cpuCost = 0;
+                    
+                    for (let g of cpuPool) {
+                        if (cpuTeam.length < 3 && cpuCost + g.cost <= 20) {
+                             const battleGolem = {
+                                ...g,
+                                originalId: g.id,
+                                maxHp: g.hp,
+                                currentHp: g.hp,
+                                currentStats: { atk: g.atk, mp: g.mp, def: g.def, sp: g.sp },
+                                boosts: { hp: 0, atk: 0, mp: 0, def: 0, sp: 0 },
+                                buffs: [],
+                                cooldowns: { recover: 0 },
+                                isSpecialUsed: false,
+                                isDead: false,
+                                team: 2 
+                            };
+                            cpuTeam.push(battleGolem);
+                            cpuCost += g.cost;
+                        }
+                    }
+                    setEnemyTeam(cpuTeam);
+                    setPhase('alchemy');
+                } else {
+                    setPhase('alchemy');
+                }
+            };
+
+            const handleAlchemy = (golemIndex, stat, change, cost) => {
+                const golem = myTeam[golemIndex];
+                const currentBoost = golem.boosts[stat];
+                
+                if (change > 0 && alchemyPoints < (change * cost)) return;
+                if (change < 0 && (currentBoost + change) < 0) return;
+
+                const newTeam = [...myTeam];
+                newTeam[golemIndex].boosts[stat] += change;
+                
+                if (stat === 'hp') {
+                    newTeam[golemIndex].maxHp += change;
+                    newTeam[golemIndex].currentHp += change;
+                } else {
+                    newTeam[golemIndex].currentStats[stat] += change;
+                }
+
+                setMyTeam(newTeam);
+                setAlchemyPoints(alchemyPoints - (change * cost));
+            };
+
+            const finishAlchemy = async () => {
+                if (gameMode === 'cpu') {
+                    const cpuBoosted = enemyTeam.map(g => {
+                        g.maxHp += 10; g.currentHp += 10;
+                        g.currentStats.atk += 10;
+                        g.currentStats.sp += 5; 
+                        return g;
+                    });
+                    setEnemyTeam(cpuBoosted);
+                    initializeBattle(myTeam, cpuBoosted);
+                } else {
+                    const roomRef = db.collection('artifacts').doc(appId).collection('public').doc('data').collection('rooms').doc(roomId);
+                    const updateField = playerId === 1 ? { player1Team: myTeam } : { player2Team: myTeam };
+                    await roomRef.update(updateField);
+                    setPhase('alchemy_wait');
+                }
+            };
+
+            // --- Battle Engine ---
+
+            const initializeBattle = (team1, team2) => {
+                setPhase('battle');
+                setTurn(1);
+                
+                const allGolems = [...team1, ...team2];
+                const queue = allGolems.sort((a, b) => {
+                    if (a.currentStats.sp === b.currentStats.sp) return Math.random() - 0.5;
+                    return b.currentStats.sp - a.currentStats.sp;
+                });
+                
+                setActionQueue(queue);
+                setCurrentActorIndex(0);
+                addLog(1, "バトル開始！", "info");
+                
+                applyPassives(queue, 'battle_start');
+            };
+
+            const applyPassives = (golems, trigger) => {
+                golems.forEach(g => {
+                    if (trigger === 'battle_start') {
+                        if (g.originalId === 9) { // Ein Eisen
+                             addLog(1, `${g.name}の特性：味方DEF+3`, "info");
+                        }
+                    }
+                });
+            };
+
+            const addLog = (turnNum, text, type = "normal") => {
+                setBattleLogs(prev => [{ turn: turnNum, text, type }, ...prev]);
+            };
+
+            const executeAction = (actionType, targetId = null) => {
+                const actor = actionQueue[currentActorIndex];
+                
+                const findGolem = (uid) => {
+                    return myTeam.find(g => g.uid === uid) || enemyTeam.find(g => g.uid === uid);
+                };
+
+                const targetGolem = targetId ? findGolem(targetId) : null;
+
+                let damage = 0;
+                let logText = "";
+                let logType = "normal";
+
+                // Log Color Logic
+                // If I am actor and I damage enemy -> Blue (good)
+                // If Enemy is actor and damages Me -> Red (bad)
+                const isActorMe = actor.team === playerId;
+                
+                if (actionType === 'strike') {
+                    damage = calculateDamage('strike', actor, targetGolem);
+                    logText = `${actor.name}のストライク！${targetGolem.name}に${damage}ダメージ`;
+                    logType = isActorMe ? "damage_given" : "damage_received";
+                    applyDamage(targetGolem, damage);
+                } 
+                else if (actionType === 'magic') {
+                    damage = calculateDamage('magic', actor, targetGolem);
+                    logText = `${actor.name}のマジック！${targetGolem.name}に${damage}ダメージ`;
+                    logType = isActorMe ? "damage_given" : "damage_received";
+                    applyDamage(targetGolem, damage);
+                    
+                    if (actor.originalId === 15) {
+                        actor.currentStats.mp += 3;
+                    }
+                } 
+                else if (actionType === 'recover') {
+                    const healAmount = calculateRecover(actor);
+                    const healTarget = targetGolem || actor; 
+                    logText = `${actor.name}のリカバー！${healTarget.name}を${healAmount}回復`;
+                    logType = "heal";
+                    healTarget.currentHp = Math.min(healTarget.maxHp, healTarget.currentHp + healAmount);
+                    actor.cooldowns.recover = 3; 
+                }
+                else if (actionType === 'special') {
+                    logText = `${actor.name}のスペシャル技！${actor.special}`;
+                    logType = "info";
+                    actor.isSpecialUsed = true;
+                    if (targetGolem) {
+                        damage = 50; 
+                        logType = isActorMe ? "damage_given" : "damage_received";
+                        applyDamage(targetGolem, damage);
+                    }
+                }
+
+                addLog(turn, logText, logType);
+                nextTurn();
+            };
+
+            const applyDamage = (target, amount) => {
+                target.currentHp -= amount;
+                if (target.currentHp <= 0) {
+                    target.currentHp = 0;
+                    target.isDead = true;
+                    addLog(turn, `${target.name}は倒れた！`, "bad");
+                    
+                    const actor = actionQueue[currentActorIndex];
+                    if (actor.originalId === 14) {
+                        actor.currentStats.atk = Math.floor(actor.currentStats.atk * 1.2);
+                        addLog(turn, `${actor.name}の特性発動！ATK上昇！`, "info");
+                    }
+                }
+            };
+
+            const nextTurn = () => {
+                let nextIndex = currentActorIndex + 1;
+                
+                if (nextIndex >= actionQueue.length) {
+                    // End of Turn Round
+                    const nextTurnNum = turn + 1;
+                    setTurn(nextTurnNum);
+                    
+                    // Turn End Processing
+                    const newQueue = actionQueue.map(g => {
+                        if (g.cooldowns.recover > 0) g.cooldowns.recover--;
+                        if (g.originalId === 8 && !g.isDead) g.currentHp = Math.min(g.maxHp, g.currentHp + 5);
+                        if (g.originalId === 12 && !g.isDead) {
+                            g.currentHp -= 3;
+                            g.currentStats.sp += 1;
+                        }
+                        return g;
+                    });
+                    
+                    // Re-sort by SP
+                    newQueue.sort((a, b) => b.currentStats.sp - a.currentStats.sp);
+                    setActionQueue(newQueue);
+                    setCurrentActorIndex(0);
+
+                } else {
+                    setCurrentActorIndex(nextIndex);
+                }
+                
+                setMyTeam([...myTeam]);
+                setEnemyTeam([...enemyTeam]);
+
+                const myAlive = myTeam.filter(g => !g.isDead).length;
+                const enemyAlive = enemyTeam.filter(g => !g.isDead).length;
+                
+                if (myAlive === 0) setPhase('gameover_lose');
+                else if (enemyAlive === 0) setPhase('gameover_win');
+            };
+
+            const cpuAction = (actor) => {
+                const validTargets = myTeam.filter(g => !g.isDead);
+                if (validTargets.length === 0) return nextTurn(); // Should triggers gameover usually but safe guard
+                const target = validTargets[Math.floor(Math.random() * validTargets.length)];
+                
+                const r = Math.random();
+                if (actor.currentHp < actor.maxHp * 0.5 && actor.cooldowns.recover === 0 && r > 0.7) {
+                    executeAction('recover', actor.uid); 
+                } else if (turn >= 3 && !actor.isSpecialUsed && r > 0.8) {
+                    executeAction('special', target.uid);
+                } else {
+                    executeAction(r > 0.5 ? 'strike' : 'magic', target.uid);
+                }
+            };
+
+
+            // --- Render Logic ---
+
+            const currentActor = actionQueue[currentActorIndex];
+            const isMyTurn = currentActor && currentActor.team === playerId && !currentActor.isDead && phase === 'battle';
+
+            if (phase === 'lobby') {
+                return (
+                    <div className="min-h-screen flex flex-col items-center justify-center p-4 bg-[url('https://images.unsplash.com/photo-1519074069444-1ba4fff66d16?q=80&w=2544&auto=format&fit=crop')] bg-cover bg-center">
+                        <div className="glass p-8 rounded-xl max-w-lg w-full text-center">
+                            <h1 className="text-4xl font-extrabold mb-2 text-yellow-400 drop-shadow-lg">ゴレムバトル</h1>
+                            <p className="text-gray-300 mb-8">最強のチームを錬成せよ</p>
+                            
+                            <div className="space-y-4">
+                                <button onClick={startCpuGame} className="w-full py-3 bg-blue-600 hover:bg-blue-500 rounded-lg font-bold flex items-center justify-center gap-2 transition">
+                                    <Bot /> CPUと対戦
+                                </button>
+                                
+                                <div className="border-t border-gray-600 my-4 pt-4">
+                                    <h3 className="text-sm text-gray-400 mb-2">オンライン対戦 (PvP)</h3>
+                                    <input 
+                                        type="text" 
+                                        placeholder="ルームID (例: room1)" 
+                                        className="w-full p-2 mb-2 bg-gray-900 border border-gray-600 rounded text-white text-center"
+                                        value={roomId}
+                                        onChange={e => setRoomId(e.target.value)}
+                                    />
+                                    <div className="flex gap-2">
+                                        <button onClick={() => startPvpGame(true)} className="flex-1 py-2 bg-purple-600 hover:bg-purple-500 rounded font-bold">
+                                            ルーム作成 (Player 1)
+                                        </button>
+                                        <button onClick={() => startPvpGame(false)} className="flex-1 py-2 bg-green-600 hover:bg-green-500 rounded font-bold">
+                                            参加 (Player 2)
+                                        </button>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                );
+            }
+
+            if (phase === 'draft') {
+                const currentCost = myTeam.reduce((acc, g) => acc + g.cost, 0);
+                return (
+                    <div className="min-h-screen p-4 max-w-7xl mx-auto">
+                        <header className="flex justify-between items-center mb-6 sticky top-0 bg-gray-900/90 backdrop-blur z-10 p-2 border-b border-gray-700">
+                            <h2 className="text-2xl font-bold">チーム編成</h2>
+                            <div className="text-right">
+                                <div className="text-xl font-mono"><span className={currentCost > 20 ? "text-red-500" : "text-yellow-400"}>{currentCost}</span> / 20 Cost</div>
+                                <div className="text-sm text-gray-400">{myTeam.length}/3 体選択中</div>
+                            </div>
+                        </header>
+
+                        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 mb-20">
+                            {draftPool.map(golem => (
+                                <GolemCard 
+                                    key={golem.uid} 
+                                    golem={golem} 
+                                    isSelected={myTeam.find(g => g.id === golem.id)}
+                                    onClick={() => handleDraftSelect(golem)}
+                                    showDetails={true} 
+                                />
+                            ))}
+                        </div>
+                        
+                        <div className="fixed bottom-0 left-0 right-0 bg-gray-900/95 border-t border-gray-700 p-4 flex justify-center gap-4 z-20 shadow-lg">
+                             <button onClick={() => setShowLibrary(true)} className="px-6 py-3 border border-gray-500 rounded hover:bg-gray-800 font-bold">
+                                図鑑を見る
+                            </button>
+                            <button 
+                                onClick={confirmDraft}
+                                disabled={myTeam.length !== 3 || currentCost > 20}
+                                className="px-10 py-3 bg-yellow-600 disabled:opacity-50 disabled:cursor-not-allowed hover:bg-yellow-500 rounded font-bold text-lg shadow-lg shadow-yellow-900/50"
+                            >
+                                決定
+                            </button>
+                        </div>
+                        
+                        {viewingGolem && <GolemDetailsModal golem={viewingGolem} onClose={() => setViewingGolem(null)} />}
+                        
+                        {showLibrary && <LibraryModal onClose={() => setShowLibrary(false)} />}
+                    </div>
+                );
+            }
+
+            if (phase === 'alchemy') {
+                return (
+                    <div className="min-h-screen p-4 max-w-7xl mx-auto">
+                         <header className="flex justify-between items-center mb-6">
+                            <h2 className="text-2xl font-bold">ステータス錬金</h2>
+                            <div className="text-right">
+                                <div className="text-xl font-mono text-cyan-400">{alchemyPoints} AP</div>
+                                <div className="text-xs text-gray-400">HP/ATK/MP: 1cost | DEF/SP: 2cost</div>
+                            </div>
+                        </header>
+
+                        {/* Layout fix: grid-cols-2 for more space */}
+                        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-8">
+                            {myTeam.map((golem, idx) => (
+                                <div key={golem.uid} className="bg-gray-800 p-4 rounded-lg border border-gray-600 shadow-lg">
+                                    <div className="flex items-center gap-3 mb-4 border-b border-gray-700 pb-2">
+                                        <div className="w-12 h-12 bg-gray-700 rounded overflow-hidden flex-shrink-0">
+                                            <img src={`./images/${golem.name}.png`} className="w-full h-full object-cover" onError={(e)=>e.target.style.display='none'}/>
+                                        </div>
+                                        <h3 className="font-bold text-lg">{golem.name}</h3>
+                                    </div>
+                                    <div className="space-y-3">
+                                        <StatEnhancer label="HP" color="text-red-400" value={golem.boosts.hp} current={golem.maxHp} ap={alchemyPoints} cost={1} 
+                                            onIncrease={()=>handleAlchemy(idx, 'hp', 1, 1)} 
+                                            onDecrease={()=>handleAlchemy(idx, 'hp', -1, 1)} 
+                                            onIncrease10={()=>handleAlchemy(idx, 'hp', 10, 1)}
+                                            onDecrease10={()=>handleAlchemy(idx, 'hp', -10, 1)}
+                                        />
+                                        <StatEnhancer label="ATK" color="text-orange-400" value={golem.boosts.atk} current={golem.currentStats.atk} ap={alchemyPoints} cost={1} 
+                                            onIncrease={()=>handleAlchemy(idx, 'atk', 1, 1)} 
+                                            onDecrease={()=>handleAlchemy(idx, 'atk', -1, 1)} 
+                                            onIncrease10={()=>handleAlchemy(idx, 'atk', 10, 1)}
+                                            onDecrease10={()=>handleAlchemy(idx, 'atk', -10, 1)}
+                                        />
+                                        <StatEnhancer label="MP" color="text-blue-400" value={golem.boosts.mp} current={golem.currentStats.mp} ap={alchemyPoints} cost={1} 
+                                            onIncrease={()=>handleAlchemy(idx, 'mp', 1, 1)} 
+                                            onDecrease={()=>handleAlchemy(idx, 'mp', -1, 1)} 
+                                            onIncrease10={()=>handleAlchemy(idx, 'mp', 10, 1)}
+                                            onDecrease10={()=>handleAlchemy(idx, 'mp', -10, 1)}
+                                        />
+                                        <StatEnhancer label="DEF" color="text-green-400" value={golem.boosts.def} current={golem.currentStats.def} ap={alchemyPoints} cost={2} 
+                                            onIncrease={()=>handleAlchemy(idx, 'def', 1, 2)} 
+                                            onDecrease={()=>handleAlchemy(idx, 'def', -1, 2)} 
+                                            onIncrease10={()=>handleAlchemy(idx, 'def', 10, 2)}
+                                            onDecrease10={()=>handleAlchemy(idx, 'def', -10, 2)}
+                                        />
+                                        <StatEnhancer label="SP" color="text-purple-400" value={golem.boosts.sp} current={golem.currentStats.sp} ap={alchemyPoints} cost={2} 
+                                            onIncrease={()=>handleAlchemy(idx, 'sp', 1, 2)} 
+                                            onDecrease={()=>handleAlchemy(idx, 'sp', -1, 2)} 
+                                            onIncrease10={()=>handleAlchemy(idx, 'sp', 10, 2)}
+                                            onDecrease10={()=>handleAlchemy(idx, 'sp', -10, 2)}
+                                        />
+                                    </div>
+                                </div>
+                            ))}
+                        </div>
+
+                        <div className="text-center">
+                            <button onClick={finishAlchemy} className="px-10 py-4 bg-cyan-700 hover:bg-cyan-600 rounded font-bold text-xl shadow-lg">
+                                バトル開始
+                            </button>
+                        </div>
+                    </div>
+                )
+            }
+
+            if (phase === 'alchemy_wait') {
+                return <div className="min-h-screen flex items-center justify-center text-2xl animate-pulse">対戦相手を待っています...</div>
+            }
+
+            if (phase === 'battle' || phase.startsWith('gameover')) {
+                return (
+                    <div className="min-h-screen flex flex-col md:flex-row max-w-7xl mx-auto h-screen overflow-hidden">
+                        {/* Left: Battle Area */}
+                        <div className="flex-1 flex flex-col p-2 bg-gray-900 relative">
+                            {/* Turn Indicator */}
+                            <div className="absolute top-4 left-1/2 transform -translate-x-1/2 bg-black/50 px-4 py-1 rounded-full z-10 flex items-center gap-4 border border-yellow-500/30 shadow-lg">
+                                <span className="font-bold text-yellow-500 text-lg">TURN {turn}</span>
+                                {phase.startsWith('gameover') && <span className="text-red-500 font-bold text-xl">{phase === 'gameover_win' ? "VICTORY" : "DEFEAT"}</span>}
+                            </div>
+
+                            {/* Battle Field Container - Using Grid for consistent sizing */}
+                            <div className="flex-1 flex flex-col gap-2 p-4 pt-12 overflow-y-auto">
+                                
+                                {/* Enemy Team */}
+                                <div className="flex-1 bg-red-900/10 rounded-xl p-4 border border-red-900/30 flex items-center justify-center">
+                                    <div className="grid grid-cols-3 gap-4 w-full max-w-5xl h-full">
+                                        {enemyTeam.map(g => (
+                                            <div key={g.uid} onClick={() => isMyTurn && setSelectedTarget(g.uid)} 
+                                                className={`relative transform transition-all duration-300 h-full
+                                                ${g.isDead ? 'opacity-30 grayscale' : 'hover:scale-[1.02]'} 
+                                                ${selectedTarget === g.uid ? 'ring-4 ring-red-500 rounded-lg scale-[1.02] z-10' : ''} cursor-pointer`}>
+                                                <GolemCard 
+                                                    golem={g} 
+                                                    showCost={false} 
+                                                    showHpBar={true} 
+                                                    isEnemy={true} // 敵フラグON
+                                                />
+                                                {currentActor?.uid === g.uid && (
+                                                    <div className="absolute -top-6 left-1/2 -translate-x-1/2 text-yellow-400 font-bold text-sm bg-black/50 px-2 rounded animate-bounce">
+                                                        ACTING
+                                                    </div>
+                                                )}
+                                            </div>
+                                        ))}
+                                    </div>
+                                </div>
+
+                                {/* My Team */}
+                                <div className="flex-1 bg-blue-900/10 rounded-xl p-4 border border-blue-900/30 flex items-center justify-center">
+                                    <div className="grid grid-cols-3 gap-4 w-full max-w-5xl h-full">
+                                        {myTeam.map(g => (
+                                            <div key={g.uid} onClick={() => isMyTurn && actionQueue[currentActorIndex]?.special === 'リカバー' && setSelectedTarget(g.uid)} 
+                                                className={`relative transform transition-all duration-300 h-full
+                                                ${g.isDead ? 'opacity-30 grayscale' : 'hover:scale-[1.02]'} 
+                                                ${selectedTarget === g.uid ? 'ring-4 ring-green-500 rounded-lg scale-[1.02] z-10' : ''} cursor-pointer`}>
+                                                <GolemCard 
+                                                    golem={g} 
+                                                    showCost={false} 
+                                                    showHpBar={true} 
+                                                    isEnemy={false} // 敵フラグOFF
+                                                />
+                                                {currentActor?.uid === g.uid && (
+                                                     <div className="absolute -top-6 left-1/2 -translate-x-1/2 text-blue-400 font-bold text-sm bg-black/50 px-2 rounded animate-bounce">
+                                                        YOUR TURN
+                                                    </div>
+                                                )}
+                                            </div>
+                                        ))}
+                                    </div>
+                                </div>
+                            </div>
+
+                            {/* Action Menu (Fixed Bottom) */}
+                            <div className="h-32 bg-gray-800 border-t border-gray-600 p-4 flex items-center justify-between shadow-2xl z-20">
+                                {isMyTurn ? (
+                                    <div className="flex gap-4 w-full max-w-4xl mx-auto">
+                                        <div className="text-sm w-40 flex flex-col justify-center">
+                                            <div className="text-gray-400 text-xs">Acting:</div>
+                                            <div className="font-bold text-blue-300 text-lg truncate">{currentActor.name}</div>
+                                            <div className="text-yellow-500 text-xs">行動を選択してください</div>
+                                        </div>
+                                        <button onClick={() => { if(!selectedTarget) return alert('対象を選んでください'); executeAction('strike', selectedTarget); setSelectedTarget(null); }} 
+                                            className="flex-1 bg-gradient-to-br from-red-900/80 to-red-800 border border-red-500 rounded-lg flex flex-col items-center justify-center p-2 hover:scale-105 transition active:scale-95 shadow-lg">
+                                            <Swords size={24} className="mb-1" /> <span className="text-sm font-bold">ストライク</span>
+                                        </button>
+                                        <button onClick={() => { if(!selectedTarget) return alert('対象を選んでください'); executeAction('magic', selectedTarget); setSelectedTarget(null); }}
+                                            className="flex-1 bg-gradient-to-br from-blue-900/80 to-blue-800 border border-blue-500 rounded-lg flex flex-col items-center justify-center p-2 hover:scale-105 transition active:scale-95 shadow-lg">
+                                            <Zap size={24} className="mb-1" /> <span className="text-sm font-bold">マジック</span>
+                                        </button>
+                                        <button onClick={() => { executeAction('recover', currentActor.uid); }}
+                                            disabled={currentActor.cooldowns.recover > 0}
+                                            className="flex-1 bg-gradient-to-br from-green-900/80 to-green-800 disabled:opacity-30 disabled:grayscale border border-green-500 rounded-lg flex flex-col items-center justify-center p-2 hover:scale-105 transition active:scale-95 shadow-lg relative">
+                                            <Heart size={24} className="mb-1" /> <span className="text-sm font-bold">リカバー</span>
+                                            {currentActor.cooldowns.recover > 0 && <span className="absolute top-1 right-1 bg-black/60 px-1 rounded text-xs text-red-300">{currentActor.cooldowns.recover}</span>}
+                                        </button>
+                                        <button onClick={() => { if(!selectedTarget) return alert('対象を選んでください'); executeAction('special', selectedTarget); setSelectedTarget(null); }}
+                                            disabled={turn < 3 || currentActor.isSpecialUsed}
+                                            className="flex-1 bg-gradient-to-br from-yellow-900/80 to-yellow-800 disabled:opacity-30 disabled:grayscale border border-yellow-500 rounded-lg flex flex-col items-center justify-center p-2 hover:scale-105 transition active:scale-95 shadow-lg relative">
+                                            <Activity size={24} className="mb-1" /> <span className="text-sm font-bold">スペシャル</span>
+                                            {turn < 3 && <span className="absolute top-1 right-1 bg-black/60 px-1 rounded text-xs text-gray-400">Lock</span>}
+                                        </button>
+                                    </div>
+                                ) : (
+                                    <div className="w-full text-center text-xl text-gray-400 animate-pulse flex items-center justify-center gap-3">
+                                        <div className="w-8 h-8 border-4 border-gray-500 border-t-yellow-400 rounded-full animate-spin"></div>
+                                        <span>相手の行動中... <span className="text-red-400 font-bold">{currentActor?.name}</span></span>
+                                    </div>
+                                )}
+                            </div>
+                        </div>
+
+                        {/* Right: Sidebar (Logs & Order) */}
+                        <div className="w-full md:w-72 bg-gray-800 border-l border-gray-700 flex flex-col h-1/3 md:h-auto shadow-xl z-30">
+                            <div className="p-3 bg-gray-700 font-bold flex justify-between items-center shadow">
+                                <span>Action Log</span>
+                                {/* データボタンを図鑑ボタンに変更 */}
+                                <button onClick={() => setShowLibrary(true)} className="text-xs bg-blue-600 hover:bg-blue-500 px-3 py-1 rounded flex items-center gap-1">
+                                    <Bot size={14}/> 図鑑
+                                </button>
+                            </div>
+                            <div className="flex-1 overflow-y-auto p-2 space-y-2 text-sm font-mono bg-gray-900/50">
+                                {battleLogs.map((log, i) => (
+                                    <div key={i} className={`border-b border-gray-700 pb-1 
+                                        ${log.type === 'damage_given' ? 'text-blue-300' : ''}
+                                        ${log.type === 'damage_received' ? 'text-red-300' : ''}
+                                        ${log.type === 'heal' ? 'text-green-300' : ''}
+                                        ${log.type === 'info' ? 'text-yellow-100/70' : ''}
+                                        ${log.type === 'bad' ? 'text-red-500 font-bold' : ''}
+                                    `}>
+                                        <span className="text-gray-500 mr-2 text-[10px]">[{log.turn}]</span>
+                                        {log.text}
+                                    </div>
+                                ))}
+                            </div>
+                            <div className="p-2 border-t border-gray-700 bg-gray-800">
+                                <h4 className="text-xs text-gray-400 mb-2 font-bold">行動順 (SP順)</h4>
+                                <div className="flex overflow-x-auto gap-2 pb-2 px-1 scrollbar-hide">
+                                    {actionQueue.map((g, i) => (
+                                        <div key={i} className={`w-10 h-10 flex-shrink-0 rounded-lg flex items-center justify-center text-sm font-bold border-2 relative transition-all
+                                            ${i === currentActorIndex ? 'border-yellow-400 bg-yellow-900/80 scale-110 shadow-lg shadow-yellow-500/20' : 'border-gray-600 bg-gray-700'}
+                                            ${g.isDead ? 'opacity-30 grayscale border-gray-800' : ''}
+                                            ${g.team === playerId ? 'text-blue-300' : 'text-red-300'}
+                                        `}>
+                                            {g.name.substr(0,1)}
+                                            {i === currentActorIndex && <div className="absolute -top-1 -right-1 w-3 h-3 bg-yellow-400 rounded-full animate-ping"></div>}
+                                        </div>
+                                    ))}
+                                </div>
+                            </div>
+                        </div>
+
+                        {/* Viewing Golem Details Modal (Used by draft, not battle anymore) */}
+                        {viewingGolem && <GolemDetailsModal golem={viewingGolem} onClose={() => setViewingGolem(null)} />}
+                        
+                        {/* Library Modal */}
+                        {showLibrary && <LibraryModal onClose={() => setShowLibrary(false)} />}
+                    </div>
+                );
+            }
+            
+            return <div>Loading...</div>;
+        };
+
+        const root = ReactDOM.createRoot(document.getElementById('root'));
+        root.render(<App />);
+    </script>
+</body>
+</html>
